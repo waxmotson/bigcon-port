@@ -1,0 +1,15 @@
+{
+  "name": "THE BIG CON",
+  "short_name": "BIG CON",
+  "description": "Scheme your way across the market. 2–8 players, peer-to-peer.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#1d201f",
+  "theme_color": "#1d201f",
+  "icons": [
+    { "src": "icon.png", "sizes": "any", "type": "image/png", "purpose": "any" },
+    { "src": "icon.png", "sizes": "any", "type": "image/png", "purpose": "maskable" }
+  ]
+}

@@ -1,0 +1,179 @@
+--- src/index.orig.html	2026-10-10 08:21:54.453364283 +0000
++++ out/index.html	2026-10-10 08:22:59.980725800 +0000
+@@ -2,10 +2,21 @@
+ <html lang="en">
+ <head>
+ <meta charset="UTF-8">
+-<meta name="viewport" content="width=device-width,initial-scale=1">
++<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
++<meta name="theme-color" content="#1d201f">
++<meta name="mobile-web-app-capable" content="yes">
++<meta name="apple-mobile-web-app-capable" content="yes">
++<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
++<meta name="apple-mobile-web-app-title" content="THE BIG CON">
++<meta name="format-detection" content="telephone=no">
++<link rel="manifest" href="manifest.webmanifest">
++<link rel="apple-touch-icon" href="icon.png">
+ <title>THE BIG CON v1.5</title>
+ <link rel="icon" href="favicon.ico">
+-<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
++<!-- PeerJS: bundled copy first (works offline / inside the iOS app), CDN only as a fallback -->
++<script src="vendor/peerjs.min.js"></script>
++<script>window.Peer||document.write('<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"><\/script>')</script>
++<script src="platform.js"></script>
+ <style>
+ *{box-sizing:border-box}
+ html,body{margin:0;padding:0}
+@@ -157,6 +168,26 @@
+ .charpick:hover:not(.taken){border-color:#168388}
+ .pface{width:28px;height:28px;border-radius:50%;object-fit:cover;border:2px solid var(--pc,#168388);flex:0 0 28px;background:#000}
+ #board text{font-family:system-ui,Segoe UI,Helvetica,Arial,sans-serif}
++/* ===== cross-platform / touch layer (iOS, Android, desktop) ===== */
++html{-webkit-text-size-adjust:100%;text-size-adjust:100%;-webkit-tap-highlight-color:transparent}
++body{overscroll-behavior-y:none;-webkit-touch-callout:none;padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)}
++button,.charpick,.prow,.modebtn,.gobtn{touch-action:manipulation}
++input,textarea,select{font-size:16px}
++#toast{top:calc(14px + env(safe-area-inset-top))}
++#setup{min-height:100vh;min-height:100dvh}
++.zoombar button{width:44px;height:44px}
++@media(hover:none){
++ .modebtn:hover{background:inherit;color:inherit}
++ .gobtn:hover{background:inherit}
++ .zoombar button:hover,button.mini:hover,.mopts button:hover{background:inherit}
++ button.act:hover:not(:disabled),button.act.primary:hover:not(:disabled){background:inherit}
++ .charpick:hover:not(.taken){border-color:inherit}
++}
++@media(max-width:600px){
++ #app{padding:8px;gap:10px}
++ .setupcard{padding:20px 16px}
++ .bigtitle{font-size:30px;letter-spacing:2px}
++}
+ </style>
+ </head>
+ <body>
+@@ -461,7 +492,7 @@
+ const TYPE_COLORS={BANK:'#a87511',COMMODITY:'#c05621',MEDIA:'#b5308c',CORPORATE:'#1f6f8b',REGULATOR:'#5c6b73',CHART:'#2e8b57',WILD:'#6b4fa0'};
+ const PCOLORS=['#f5c542','#55c1ff','#e19bff','#7fe08d','#ff5e9c','#ffffff','#00e5c0','#ffa94d'];
+ const MAXPLAYERS=8;
+-const CHARURL='https://raw.githubusercontent.com/waxmotson/bigcon/main/characters/';
++const CHARURL='./characters/';
+ const CHARS=[
+  {id:'markwatson',name:'Mark Watson',file:'markwatson.png'},
+  {id:'tomkins',name:'Tomkins',file:'tomkins.png'},
+@@ -1432,7 +1463,16 @@
+  if(Net.role==='host'){addChat(Net.myIdx,t)}
+  else if(Net.conn&&Net.conn.open){Net.conn.send({t:'chat',text:t})}
+ }
+-function getPlayerId(){const key='bigcon-player-id';let id=sessionStorage.getItem(key);if(!id){id=crypto.randomUUID();sessionStorage.setItem(key,id)}return id;}
++function getPlayerId(){
++ const key='bigcon-player-id';
++ /* Native apps keep the id across app suspension/relaunch so a seat can be reclaimed;
++    browsers keep per-tab ids so two tabs can still be two players. */
++ let st=sessionStorage;
++ try{if(window.bigconPlatform&&window.bigconPlatform.isNative)st=localStorage}catch(_){}
++ let id=null;try{id=st.getItem(key)}catch(_){}
++ if(!id){id=(crypto.randomUUID?crypto.randomUUID():('p'+Date.now().toString(36)+Math.random().toString(36).slice(2)));try{st.setItem(key,id)}catch(_){}}
++ return id;
++}
+ function dispatch(m){
+  if(!S||S.over)return;
+  if(Net.role==='host')applyIntent(Net.myIdx,m);
+@@ -1453,11 +1493,32 @@
+ function clampVB(){VB.x=Math.min(2400-VB.w,Math.max(0,VB.x));VB.y=Math.min(1560-VB.h,Math.max(0,VB.y))}
+ svgEl.addEventListener('wheel',e=>{e.preventDefault();zoomAt(e.deltaY>0?1.13:0.885,e.clientX,e.clientY)},{passive:false});
+ let drag=null,lastTapTarget=null;
+-svgEl.addEventListener('pointerdown',e=>{drag={x:e.clientX,y:e.clientY,moved:false};lastTapTarget=e.target;});
++const ptrs=new Map();let pinch=null;
++function endPtr(e){
++ ptrs.delete(e.pointerId);
++ if(ptrs.size<2)pinch=null;
++ if(ptrs.size===0){drag=null;svgEl.classList.remove('panning')}
++}
++svgEl.addEventListener('pointerdown',e=>{
++ ptrs.set(e.pointerId,{x:e.clientX,y:e.clientY});
++ if(ptrs.size===2){
++  const [a,b]=[...ptrs.values()];
++  pinch={d:Math.hypot(a.x-b.x,a.y-b.y)||1};
++  drag=null;svgEl.classList.add('panning');return;
++ }
++ drag={x:e.clientX,y:e.clientY,moved:false};lastTapTarget=e.target;
++});
+ svgEl.addEventListener('pointermove',e=>{
++ if(ptrs.has(e.pointerId))ptrs.set(e.pointerId,{x:e.clientX,y:e.clientY});
++ if(pinch&&ptrs.size>=2){
++  const [a,b]=[...ptrs.values()];
++  const d=Math.hypot(a.x-b.x,a.y-b.y)||1;
++  zoomAt(pinch.d/d,(a.x+b.x)/2,(a.y+b.y)/2);
++  pinch.d=d;return;
++ }
+  if(!drag)return;
+  const dx=e.clientX-drag.x,dy=e.clientY-drag.y;
+- if(!drag.moved&&Math.abs(dx)+Math.abs(dy)>6){
++ if(!drag.moved&&Math.abs(dx)+Math.abs(dy)>(e.pointerType==='touch'?10:6)){
+   drag.moved=true;
+   try{svgEl.setPointerCapture(e.pointerId)}catch(_){}
+   svgEl.classList.add('panning');
+@@ -1468,12 +1529,13 @@
+   drag.x=e.clientX;drag.y=e.clientY;
+  }
+ });
+-svgEl.addEventListener('pointerup',()=>{
+- if(drag&&!drag.moved)handleNodeTap(lastTapTarget);
+- drag=null;svgEl.classList.remove('panning');
++svgEl.addEventListener('pointerup',e=>{
++ const wasPinch=!!pinch;
++ if(!wasPinch&&drag&&!drag.moved)handleNodeTap(lastTapTarget);
++ endPtr(e);
+ });
+-svgEl.addEventListener('pointercancel',()=>{drag=null;svgEl.classList.remove('panning')});
+-window.addEventListener('pointerup',e=>{if(drag&&e.target&&e.target!==svgEl&&!svgEl.contains(e.target)){drag=null;svgEl.classList.remove('panning')}});
++svgEl.addEventListener('pointercancel',endPtr);
++window.addEventListener('pointerup',e=>{if(drag&&e.target&&e.target!==svgEl&&!svgEl.contains(e.target)){ptrs.clear();pinch=null;drag=null;svgEl.classList.remove('panning')}});
+ function handleNodeTap(t){
+  if(!t||!t.closest)return;
+  const g=t.closest('g.node');
+@@ -1485,7 +1547,7 @@
+   if(S.steps<=0)return;
+   if(!canReach(id)){toast('Qantas is grounded on the first turn.');return}
+   if((ADJ[S.players[Net.myIdx].pos]||[]).includes(id))dispatch({act:'move',id});
+-  else toast('You can only move along the red threads — click a highlighted node.');
++  else toast('You can only move along the red threads — tap a highlighted node.');
+  } else if(S.phase==='action'&&S.mode==='bug'){
+   dispatch({act:'bug',id});
+  }
+@@ -1992,7 +2054,15 @@
+ })();
+  $('btnCopy').onclick=()=>{
+  const code=Net.roomLabel||Net.roomCode||'';
+- try{navigator.clipboard.writeText(code).then(()=>toast('Room code copied: '+code))}catch(e){toast('Code: '+code)}
++ const plat=window.bigconPlatform;
++ const link=plat&&plat.inviteLink?plat.inviteLink(Net.roomCode||code):'';
++ if(plat&&plat.isNative&&navigator.share){
++  navigator.share({title:'THE BIG CON',text:'Join my con. Buzzword: '+code,url:link||undefined}).catch(()=>{});
++  return;
++ }
++ const txt=link||code;
++ const done=()=>toast((link?'Invite link copied: ':'Room code copied: ')+code);
++ try{navigator.clipboard.writeText(txt).then(done,()=>toast('Code: '+code))}catch(e){toast('Code: '+code)}
+ };
+ (function(){
+  const dl=$('buzzwords');
+@@ -2005,8 +2075,7 @@
+ /* Discord "Invite to join" — the desktop build delivers the join secret
+    here. The website never sees window.discordRPC, so this is a no-op there. */
+ (function bindDiscordJoin(){
+- const b=(typeof window!=='undefined'&&window.discordRPC)||null;
+- if(!b)return;
++ const b=(typeof window!=='undefined'&&window.discordRPC)||{};
+  function applySecret(secret){
+   const code=Presence.decodeJoinSecret(secret);
+   if(!code){setNetStatus('That Discord invite did not contain a room.',true);return}
+@@ -2038,6 +2107,8 @@
+   }
+   setNetStatus('Discord invite for “'+codeLabel(code)+'” — type a name and hit JOIN GAME.');
+  }
++ window.bigconJoin=applySecret;
++ if(window.bigconPlatform&&window.bigconPlatform.flushJoin)window.bigconPlatform.flushJoin(applySecret);
+  if(typeof b.onJoin==='function')b.onJoin(applySecret);
+  if(typeof b.takePendingJoin==='function'){
+   Promise.resolve(b.takePendingJoin()).then(s=>{if(s)applySecret(s)}).catch(()=>{});
